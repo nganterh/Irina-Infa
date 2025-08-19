@@ -99,18 +99,8 @@ st.markdown(
 # -------------------- Top bar con logo --------------------
 
 def _logo_data_url() -> str:
-    candidates = [
-        Path("logo_2024.ico"), Path("logo_2024.png"), Path("logo_2024.jpg"), Path("logo_2024"),
-        Path("Metro Santiago.jpg"), Path("Metro Santiago.JPG"), Path("logo_metro_versiones-05.jpg"),
-        Path("assets/metro_logo.png"), Path("assets/metro_logo.jpg")
-    ]
-    for p in candidates:
-        if p.exists():
-            mime, _ = guess_type(p.name)
-            mime = mime or ("image/png" if p.suffix.lower()==".png" else "image/jpeg")
-            data = base64.b64encode(p.read_bytes()).decode()
-            return f"data:{mime};base64,{data}"
-    return ""
+    # Logo visible dentro de la página (topbar)
+    return "https://i.pinimg.com/736x/46/6a/3a/466a3af75320ca9bb837c5c7bff3326b.jpg"
 
 _logo = _logo_data_url()
 _logo_tag = f"<img src='{_logo}' alt='Metro'/>" if _logo else ""
