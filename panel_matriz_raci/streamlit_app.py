@@ -23,7 +23,7 @@ except Exception:
 # -------------------- Configuración general --------------------
 def _find_logo_path():
     candidates = [
-        Path("logo_2024.ico"), Path("logo_2024.png"), Path("logo_2024.jpg"), Path("logo_2024"),
+        Path("logo_2024.svg"), Path("logo_2024.png"), Path("logo_2024.jpg"), Path("logo_2024"),
         Path("Metro Santiago.jpg"), Path("Metro Santiago.JPG"), Path("logo_metro_versiones-05.jpg"),
         Path("assets/metro_logo.png"), Path("assets/metro_logo.jpg")
     ]
