@@ -328,7 +328,45 @@ class RaciRenderer {
         update_mode=GridUpdateMode.NO_UPDATE,
     )
 else:
-    st.dataframe(view, use_container_width=True, hide_index=True)
+    # Fallback bonito sin AgGrid: emojis + Styler (colores visibles en web)
+    view_disp = view.copy()
+
+    def raci_emoji(v: str) -> str:
+        val = str(v or "").upper().replace(" ", "")
+        if val in ("A", "R", "C", "I"):
+            return {"A": "🔴 A", "R": "🟢 R", "C": "🟠 C", "I": "🔵 I"}[val]
+        if val in ("AR", "A/R", "A,R"):
+            return "🔴🟢 A/R"
+        return str(v)
+
+    if 'Rol (RACI)' in view_disp.columns:
+        view_disp['Rol (RACI)'] = view_disp['Rol (RACI)'].map(raci_emoji)
+
+        def raci_style(s: pd.Series):
+            styles = []
+            for v in s.astype(str):
+                if "🔴🟢" in v or v.strip().upper() in ("AR", "A/R", "A,R"):
+                    styles.append('background: linear-gradient(90deg,#fee2e2,#dcfce7); font-weight:700;')
+                elif "🔴" in v or v.strip().upper() == "A":
+                    styles.append('background-color:#fee2e2; color:#991b1b; font-weight:700;')
+                elif "🟢" in v or v.strip().upper() == "R":
+                    styles.append('background-color:#dcfce7; color:#065f46; font-weight:700;')
+                elif "🟠" in v or v.strip().upper() == "C":
+                    styles.append('background-color:#fef3c7; color:#92400e; font-weight:700;')
+                elif "🔵" in v or v.strip().upper() == "I":
+                    styles.append('background-color:#dbeafe; color:#1e3a8a; font-weight:700;')
+                else:
+                    styles.append('')
+            return styles
+
+        sty = (
+            view_disp.style
+            .apply(raci_style, subset=['Rol (RACI)'])
+            .set_properties(subset=['Rol (RACI)'], **{'text-align':'center'})
+        )
+        st.dataframe(sty, use_container_width=True, hide_index=True)
+    else:
+        st.dataframe(view_disp, use_container_width=True, hide_index=True)
 
 # -------------------- CONTADORES (movidos ABAJO) --------------------
 col1, col2, col3, col4, col5 = st.columns([1,1,1,1,1])
