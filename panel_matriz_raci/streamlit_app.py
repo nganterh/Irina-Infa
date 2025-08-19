@@ -204,7 +204,9 @@ area_cols = [
 # -------------------- Sidebar filtros --------------------
 with st.sidebar:
     st.header("Filtros")
-    areas_sel = st.multiselect("Áreas (columnas)", area_cols, default=area_cols)
+    default_area_name = "Cultura Organizacional"
+    default_areas = [a for a in area_cols if a == default_area_name] or (area_cols[:1] if area_cols else [])
+    areas_sel = st.multiselect("Áreas (columnas)", area_cols, default=default_areas)
     roles_all = ["A", "R", "C", "I"]
     roles_sel = st.multiselect("Rol RACI", roles_all, default=roles_all)
     q = st.text_input("Buscar en Proceso/Tarea", placeholder="Palabra clave…")
@@ -214,18 +216,13 @@ with st.sidebar:
     # Filtro Proceso (desde df completo para que siempre estén todas las opciones)
     proc_sel = None
     if 'Proceso' in df.columns:
-        proc_series_full = (
-            df['Proceso'].dropna().astype(str).str.strip()
-        )
-        proc_options = ['Todos los procesos'] + list(pd.unique(proc_series_full))
-        default_proc = st.session_state.get('proc_sel', proc_options[1] if len(proc_options) > 1 else proc_options[0])
-        default_idx = proc_options.index(default_proc) if default_proc in proc_options else 0
-        proc_sel = None
-    if 'Proceso' in df.columns:
         proc_series_full = df['Proceso'].dropna().astype(str).str.strip()
         proc_options = list(pd.unique(proc_series_full))
-        default_procs = st.session_state.get('proc_sel_multi', proc_options)
-        proc_sel = st.multiselect('Proceso', proc_options, default=default_procs, key='proc_sel_multi', help='Puedes seleccionar uno o varios procesos')
+        preferred_proc = "Definición de Metas"
+        initial_default = [p for p in proc_options if p == preferred_proc] or (proc_options[:1] if proc_options else [])
+        if 'proc_sel_multi' not in st.session_state:
+            st.session_state['proc_sel_multi'] = initial_default
+        proc_sel = st.multiselect('Proceso', proc_options, default=st.session_state['proc_sel_multi'], key='proc_sel_multi', help='Puedes seleccionar uno o varios procesos')
 
 # -------------------- Lógica de filtrado --------------------
 ROLE_RE = re.compile(r"[ARCI]")
@@ -413,18 +410,8 @@ else:
         def raci_style(s: pd.Series):
             styles = []
             for v in s.astype(str):
-                if "🔴🟢" in v or v.strip().upper() in ("AR", "A/R", "A,R"):
-                    styles.append('background: linear-gradient(90deg,#fee2e2,#dcfce7); font-weight:700; white-space:nowrap;')
-                elif "🔴" in v or v.strip().upper() == "A":
-                    styles.append('background-color:#fee2e2; color:#991b1b; font-weight:700; white-space:nowrap;')
-                elif "🟢" in v or v.strip().upper() == "R":
-                    styles.append('background-color:#dcfce7; color:#065f46; font-weight:700; white-space:nowrap;')
-                elif "🟠" in v or v.strip().upper() == "C":
-                    styles.append('background-color:#fef3c7; color:#92400e; font-weight:700; white-space:nowrap;')
-                elif "🔵" in v or v.strip().upper() == "I":
-                    styles.append('background-color:#dbeafe; color:#1e3a8a; font-weight:700; white-space:nowrap;')
-                else:
-                    styles.append('white-space:nowrap;')
+                # Sin relleno de color: solo énfasis tipográfico y no wrap
+                styles.append('font-weight:700; white-space:nowrap;')
             return styles
 
         sty = (
