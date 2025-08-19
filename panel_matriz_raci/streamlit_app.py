@@ -1,5 +1,8 @@
-# streamlit_app.py — versión con hero eliminado y contadores abajo
-# Ejecuta: streamlit run streamlit_app.py
+# streamlit_app.py — versión robusta para despliegue en Streamlit Cloud
+# - Busca el Excel en rutas típicas (evita errores por espacios/acentos)
+# - Soporta carga por file_uploader si el archivo no está en el repo
+# - Selección de hoja inteligente (usa "streamlit" o la primera disponible)
+# - Contadores abajo y descarga XLSX con nombre yyyyMMDD_proceso_area.xlsx
 
 from __future__ import annotations
 import re
@@ -9,6 +12,7 @@ from io import BytesIO
 from datetime import datetime
 from mimetypes import guess_type
 from pathlib import Path
+from typing import Tuple
 
 import pandas as pd
 import streamlit as st
@@ -21,6 +25,7 @@ except Exception:
     AGGRID_AVAILABLE = False
 
 # -------------------- Configuración general --------------------
+
 def _find_logo_path():
     candidates = [
         Path("logo_2024.svg"), Path("logo_2024.png"), Path("logo_2024.jpg"), Path("logo_2024"),
@@ -125,23 +130,84 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# -------------------- Datos --------------------
+# -------------------- Carga de datos (robusta) --------------------
+BASE_DIR = Path(__file__).resolve().parent
+PREFERRED_SHEET = "streamlit"  # ajusta si aplica
+
+
+def _find_excel_candidates() -> list[Path]:
+    pats = [
+        BASE_DIR / "data",
+        BASE_DIR,
+    ]
+    found: list[Path] = []
+    for root in pats:
+        if root.exists():
+            found += list(root.glob("**/*[Mm]atriz*[Rr][Aa][Cc][Ii]*.xlsx"))
+            found += list(root.glob("**/*raci*.xlsx"))
+    # Evitar duplicados conservando orden
+    uniq = []
+    seen = set()
+    for p in found:
+        if p.resolve() not in seen:
+            uniq.append(p)
+            seen.add(p.resolve())
+    return uniq
+
+
 @st.cache_data
-def load_data(path: Path, sheet: str) -> pd.DataFrame:
+def _load_from_path(path: str | Path, preferred_sheet: str) -> Tuple[pd.DataFrame, str]:
+    path = Path(path)
+    xls = pd.ExcelFile(path)
+    sheet = preferred_sheet if preferred_sheet in xls.sheet_names else xls.sheet_names[0]
     df = pd.read_excel(path, sheet_name=sheet)
     df.columns = df.columns.str.strip()
-    return df
+    return df, sheet
 
-XLSX_PATH = Path("Matriz RACI Nico.xlsx")
-SHEET = "streamlit"  # Ajusta si tu hoja tiene otro nombre
 
-df = load_data(XLSX_PATH, SHEET)
+@st.cache_data
+def _load_from_bytes(data: bytes, preferred_sheet: str) -> Tuple[pd.DataFrame, str]:
+    bio = BytesIO(data)
+    xls = pd.ExcelFile(bio)
+    sheet = preferred_sheet if preferred_sheet in xls.sheet_names else xls.sheet_names[0]
+    bio.seek(0)
+    df = pd.read_excel(bio, sheet_name=sheet)
+    df.columns = df.columns.str.strip()
+    return df, sheet
+
+
+with st.sidebar:
+    st.header("Origen de datos")
+    uploaded = st.file_uploader("Sube Excel RACI (.xlsx)", type=["xlsx"], help="Si no subes nada, la app buscará un archivo en el repo (data/ o raíz)")
+
+# Resolver origen de datos
+if uploaded is not None:
+    df, SHEET_USED = _load_from_bytes(uploaded.getvalue(), PREFERRED_SHEET)
+    DATA_SOURCE = f"archivo subido: {uploaded.name}"
+else:
+    candidates = _find_excel_candidates()
+    if not candidates:
+        st.error(
+            "No encuentro el Excel RACI. Sube un archivo con el botón de la barra lateral "
+            "o agrega uno al repo (sugerido: data/Matriz_RACI_Nico.xlsx)."
+        )
+        st.stop()
+    # usa el primero
+    path = candidates[0]
+    df, SHEET_USED = _load_from_path(path, PREFERRED_SHEET)
+    DATA_SOURCE = f"repo: {path.relative_to(BASE_DIR)}"
+
+st.caption(f"Origen: {DATA_SOURCE} — Hoja: {SHEET_USED}")
 
 # -------------------- Descubrimiento de columnas RACI --------------------
 BASE_COLS = [c for c in ["Proceso", "Tarea"] if c in df.columns]
-RACI_PAT = re.compile(r"^[ARCI/\-\s]*$")
+RACI_PAT = re.compile(r"^[ARCI/\-\s,]*$")
 _cands = [c for c in df.columns if c not in BASE_COLS]
-area_cols = [c for c in _cands if ({str(v).strip().upper() for v in df[c].dropna().unique()} and all(RACI_PAT.match(str(v).strip().upper() or "") for v in df[c].dropna().unique()))] or _cands
+area_cols = [
+    c for c in _cands
+    if ({str(v).strip().upper() for v in df[c].dropna().unique()} and
+        all(RACI_PAT.match(str(v).strip().upper() or "") for v in df[c].dropna().unique()))
+] or _cands
 
 # -------------------- Sidebar filtros --------------------
 with st.sidebar:
@@ -176,10 +242,12 @@ with st.sidebar:
 # -------------------- Lógica de filtrado --------------------
 ROLE_RE = re.compile(r"[ARCI]")
 
+
 def parse_roles(cell: str) -> set[str]:
     if cell is None:
         return set()
     return set(ROLE_RE.findall(str(cell).upper()))
+
 
 work = df.copy()
 work["Rol"] = (
@@ -222,11 +290,14 @@ if proc_sel:
 view = work.loc[:, [c for c in ["Tarea", area] if c in work.columns]].rename(columns={area: "Rol (RACI)"})
 
 # Ordenar alfabéticamente por Tarea (ignorando tildes y mayúsculas)
+
 def _sort_key_series(s: pd.Series) -> pd.Series:
     return s.astype(str).map(lambda x: ''.join(c for c in unicodedata.normalize('NFD', x) if unicodedata.category(c) != 'Mn').lower())
 
+
 if 'Tarea' in view.columns:
     view = view.sort_values(by='Tarea', key=_sort_key_series, kind='mergesort').reset_index(drop=True)
+
 # --- Tabla con AG Grid (responsive y mobile-friendly) ---
 if AGGRID_AVAILABLE:
     gb = GridOptionsBuilder.from_dataframe(view)
@@ -317,8 +388,7 @@ with pd.ExcelWriter(bio, engine='openpyxl') as writer:
     view.to_excel(writer, index=False, sheet_name='raci')
 bio.seek(0)
 
-# Espacio para el botón de descarga
-st.markdown("---")  # Línea separadora
+st.markdown("---")
 
 st.download_button(
     label="Descargar XLSX",
