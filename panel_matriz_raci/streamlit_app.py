@@ -391,9 +391,9 @@ class RaciRenderer {
         update_mode=GridUpdateMode.NO_UPDATE,
     )
 else:
-    # Fallback bonito sin AgGrid: reordenamos y ponemos Rol adelante para que siempre se vea
+    # Fallback sin AgGrid: orden ID | Rol | Tarea | (Área) | (Proceso)
     view_disp = view.copy()
-    col_order = [c for c in ['ID', 'Tarea', 'Rol (RACI)', 'Área', 'Proceso'] if c in view_disp.columns]
+    col_order = [c for c in ['ID', 'Rol (RACI)', 'Tarea', 'Área', 'Proceso'] if c in view_disp.columns]
     view_disp = view_disp[col_order]
 
     def raci_emoji(v: str) -> str:
@@ -418,8 +418,12 @@ else:
             view_disp.style
             .apply(raci_style, subset=['Rol (RACI)'])
             .set_properties(subset=['Rol (RACI)'], **{'text-align':'center'})
+            .set_properties(subset=['ID'], **{'text-align':'center','width':'56px'})
         )
-        sty = sty.set_table_styles([{'selector': 'th', 'props': 'text-align: center;'}], overwrite=False)
+        sty = sty.set_table_styles([
+            {'selector': 'th', 'props': 'text-align: center;'},
+            {'selector': '.col0', 'props': 'min-width:56px; width:56px; text-align:center;'}
+        ], overwrite=False)
         st.dataframe(sty, use_container_width=True, hide_index=True)
     else:
         st.dataframe(view_disp, use_container_width=True, hide_index=True)
