@@ -3,12 +3,12 @@ nanoid
 nbformat
 numpy
 openpyxl
-pandas
+pandas>=1.5
 pandas-gbq
 plotly
 pyarrow
-streamlit
-st-aggrid
+streamlit>=1.30
+st-aggrid==0.3.4.post3
 subprocess.run
 tqdm
 urllib3
