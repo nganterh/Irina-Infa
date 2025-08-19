@@ -70,7 +70,7 @@ st.markdown(
 
   .metric {{ border:1px solid {COLOR_BORDE}; border-radius:16px; padding:12px 14px; background:#fff; text-align:center; }}
   .metric .num {{ font-size:1.6rem; font-weight:900; }}
-  .metric .lbl {{ color:{COLOR_TXT_SUAVE}; font-weight:600; letter-spacing:.5px; }}
+  .metric .lbl {{ color:{COLOR_TXT_SUAVE}; font-weight:600; letter-spacing:.5px; white-space: nowrap; }}; font-weight:600; letter-spacing:.5px; }}
 
   .stDataFrame {{ border:1px solid {COLOR_BORDE}; border-radius: 12px; }}
 
@@ -86,6 +86,8 @@ st.markdown(
     border-radius: 12px;
   }}
   .ag-theme-alpine .ag-cell-wrap-text {{ white-space: normal !important; }}
+  .ag-theme-alpine .ag-header-cell-label {{ justify-content: center; }}
+  .ag-theme-alpine .ag-header-cell-text {{ text-align: center; width: 100%; }}
 
   @media (max-width: 640px) {{
     .block-container {{ padding-left: 10px; padding-right: 10px; padding-top: 80px; }}
@@ -202,21 +204,12 @@ area_cols = [
 # -------------------- Sidebar filtros --------------------
 with st.sidebar:
     st.header("Filtros")
-    area = st.selectbox("Área (columna)", area_cols, index=0)
+    areas_sel = st.multiselect("Áreas (columnas)", area_cols, default=area_cols)
     roles_all = ["A", "R", "C", "I"]
     roles_sel = st.multiselect("Rol RACI", roles_all, default=roles_all)
     q = st.text_input("Buscar en Proceso/Tarea", placeholder="Palabra clave…")
 
-    st.markdown(
-        """
-        **Leyenda**<br>
-        <span class='metro-chip'><span class='dot A'></span>A (Accountable)</span>
-        <span class='metro-chip'><span class='dot R'></span>R (Responsible)</span>
-        <span class='metro-chip'><span class='dot C'></span>C (Consulted)</span>
-        <span class='metro-chip'><span class='dot I'></span>I (Informed)</span>
-        """,
-        unsafe_allow_html=True,
-    )
+    
 
     # Filtro Proceso (desde df completo para que siempre estén todas las opciones)
     proc_sel = None
@@ -227,7 +220,12 @@ with st.sidebar:
         proc_options = ['Todos los procesos'] + list(pd.unique(proc_series_full))
         default_proc = st.session_state.get('proc_sel', proc_options[1] if len(proc_options) > 1 else proc_options[0])
         default_idx = proc_options.index(default_proc) if default_proc in proc_options else 0
-        proc_sel = st.selectbox('Proceso', proc_options, index=default_idx, key='proc_sel', help='Filtra la tabla y las métricas por proceso')
+        proc_sel = None
+    if 'Proceso' in df.columns:
+        proc_series_full = df['Proceso'].dropna().astype(str).str.strip()
+        proc_options = list(pd.unique(proc_series_full))
+        default_procs = st.session_state.get('proc_sel_multi', proc_options)
+        proc_sel = st.multiselect('Proceso', proc_options, default=default_procs, key='proc_sel_multi', help='Puedes seleccionar uno o varios procesos')
 
 # -------------------- Lógica de filtrado --------------------
 ROLE_RE = re.compile(r"[ARCI]")
@@ -239,10 +237,13 @@ def parse_roles(cell: str) -> set[str]:
     return set(ROLE_RE.findall(str(cell).upper()))
 
 
-work = df.copy()
-work["Rol"] = (
-    work[area].fillna("").astype(str).str.upper().str.replace(" ", "", regex=False)
-)
+# Construcción del dataframe de trabajo (múltiples áreas)
+id_cols = [c for c in ["Proceso", "Tarea"] if c in df.columns]
+areas_to_use = areas_sel if areas_sel else area_cols
+work = df.melt(id_vars=id_cols, value_vars=areas_to_use, var_name="Área", value_name="Rol")
+
+# Normaliza
+work["Rol"] = work["Rol"].fillna("").astype(str).str.upper().str.replace(" ", "", regex=False)
 
 # Filtrar por roles
 if roles_sel:
@@ -253,8 +254,8 @@ else:
     work = work.iloc[0:0]
 
 # Filtrar por proceso (si aplica)
-if proc_sel and proc_sel != 'Todos los procesos' and 'Proceso' in work.columns:
-    work = work[work['Proceso'].astype(str).str.strip() == proc_sel]
+if proc_sel and 'Proceso' in work.columns:
+    work = work[work['Proceso'].astype(str).str.strip().isin(proc_sel)]
 
 # Filtro de búsqueda
 if q:
@@ -273,11 +274,24 @@ count_I  = int(work["Rol"].apply(lambda x: "I" in parse_roles(x)).sum())
 count_AR = int(work["Rol"].apply(lambda x: parse_roles(x) == {"A","R"}).sum())
 
 # -------------------- Tabla --------------------
-st.subheader(f"Tareas para **{area}**")
+area_title = areas_to_use[0] if len(areas_to_use) == 1 else f"{len(areas_to_use)} áreas"
+st.subheader(f"Tareas para **{area_title}**")
 if proc_sel:
-    st.caption(f"Proceso seleccionado: {proc_sel}")
+    if isinstance(proc_sel, list) and len(proc_sel) > 1:
+        shown = ", ".join(proc_sel[:4]) + ("…" if len(proc_sel) > 4 else "")
+        st.caption(f"Procesos seleccionados: {shown}")
+    elif isinstance(proc_sel, list) and len(proc_sel) == 1:
+        st.caption(f"Proceso seleccionado: {proc_sel[0]}")
 
-view = work.loc[:, [c for c in ["Tarea", area] if c in work.columns]].rename(columns={area: "Rol (RACI)"})
+multi_proc = ('Proceso' in work.columns) and proc_sel and len(proc_sel) > 1
+view_cols = ['Tarea']
+if multi_proc:
+    view_cols.append('Proceso')
+view_cols += ['Área', 'Rol']
+view = work.loc[:, [c for c in view_cols if c in work.columns]].rename(columns={'Rol': 'Rol (RACI)'})
+# Oculta columna Área cuando sólo hay una seleccionada
+if 'Área' in view.columns and len(areas_to_use) == 1:
+    view = view.drop(columns=['Área'])
 
 # Ordenar alfabéticamente por Tarea (ignorando tildes y mayúsculas)
 
@@ -286,21 +300,51 @@ def _sort_key_series(s: pd.Series) -> pd.Series:
 
 
 if 'Tarea' in view.columns:
-    view = view.sort_values(by='Tarea', key=_sort_key_series, kind='mergesort').reset_index(drop=True)
+    sort_by = []
+    if 'Proceso' in view.columns:
+        sort_by.append('Proceso')
+    if 'Área' in view.columns:
+        sort_by.append('Área')
+    sort_by.append('Tarea')
+    view = view.sort_values(by=sort_by, key=_sort_key_series, kind='mergesort').reset_index(drop=True)
+
+# Agrega columna de IDs 1..N (después del ordenamiento)
+# Elimina cualquier columna ID previa (del Excel) y crea una nueva 1..N
+if 'ID' in view.columns:
+    view = view.drop(columns=['ID'])
+view.insert(0, 'ID', range(1, len(view) + 1))
+# fuerza tipo numérico para evitar orden lexicográfico en AgGrid
+view['ID'] = pd.to_numeric(view['ID'], errors='coerce').fillna(0).astype(int)
+# Asegura orden por ID ascendente por defecto
+view = view.sort_values(by='ID', kind='mergesort').reset_index(drop=True)
 
 # --- Tabla con AG Grid (responsive y mobile-friendly) ---
+# Orden final: ID | Rol | Tarea | (Área) | (Proceso)
+col_order = [c for c in ['ID', 'Rol (RACI)', 'Tarea', 'Área', 'Proceso'] if c in view.columns]
+view = view[col_order]
+
 if AGGRID_AVAILABLE:
     gb = GridOptionsBuilder.from_dataframe(view)
     gb.configure_default_column(resizable=True, sortable=True, filter=True, wrapText=True, autoHeight=True)
     gb.configure_grid_options(domLayout='normal', quickFilterText=(q or ""), rowHeight=36, headerHeight=38, suppressPaginationPanel=True)
-    gb.configure_column('Tarea', header_name='Tarea', flex=3, minWidth=280, cellStyle={'white-space':'normal'}, sort='asc')
-    raci_renderer = JsCode("""
+
+    # Columna ID (fijada izquierda)
+    if 'ID' in view.columns:
+        id_num_sort = JsCode("function(a,b){ return Number(a) - Number(b); }")
+        gb.configure_column(
+            'ID', header_name='ID', width=70, minWidth=60, maxWidth=80,
+            pinned='left', sort='asc', type=['numericColumn','numberColumnFilter'], comparator=id_num_sort
+        )
+
+    # Columna Rol (protagónica y SIEMPRE visible)
+    if 'Rol (RACI)' in view.columns:
+        raci_renderer = JsCode("""
 class RaciRenderer {
   init(params){
     const val = (params.value || '').toString().toUpperCase().split(' ').join('');
     const map = { 'A':'#ef4444','R':'#10b981','C':'#f59e0b','I':'#3b82f6' };
     const dot = function(c){
-      return '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+c+';margin-right:6px;"></span>';
+      return '<span style=\"display:inline-block;width:10px;height:10px;border-radius:50%;background:'+c+';margin-right:6px;\"></span>';
     };
     let html;
     if (val==='A/R' || val==='AR' || val==='A,R'){
@@ -310,12 +354,34 @@ class RaciRenderer {
       html = dot(color) + val;
     }
     this.eGui = document.createElement('span');
+    this.eGui.style.whiteSpace = 'nowrap';
+    this.eGui.style.fontWeight = '700';
     this.eGui.innerHTML = html;
   }
   getGui(){ return this.eGui; }
 }
 """)
-    gb.configure_column('Rol (RACI)', header_name='Rol', width=100, minWidth=84, maxWidth=140, pinned='right', cellRenderer=raci_renderer, wrapText=True, autoHeight=True)
+        gb.configure_column(
+            'Rol (RACI)', header_name='Rol', pinned='right', width=170, minWidth=150, maxWidth=230,
+            cellRenderer=raci_renderer, wrapText=False, autoHeight=True,
+            cellStyle={'white-space':'nowrap','text-align':'center','font-weight':'700'}
+        )
+
+    # Tarea y otras columnas
+    if 'Tarea' in view.columns:
+        gb.configure_column('Tarea', header_name='Tarea', flex=3, minWidth=260, cellStyle={'white-space':'normal'})
+    if 'Área' in view.columns:
+        gb.configure_column('Área', header_name='Área', flex=2, minWidth=160)
+    if 'Proceso' in view.columns:
+        gb.configure_column('Proceso', header_name='Proceso', flex=2, minWidth=160)
+
+    # Override para fijar Rol a la izquierda y centrar
+    try:
+        gb.configure_column('Rol (RACI)', header_name='Rol', pinned='left', width=170, minWidth=150, maxWidth=230,
+                            cellRenderer=raci_renderer, wrapText=False, autoHeight=True,
+                            cellStyle={'white-space':'nowrap','text-align':'center','font-weight':'700'})
+    except Exception:
+        pass
     go = gb.build()
     AgGrid(
         view,
@@ -328,8 +394,10 @@ class RaciRenderer {
         update_mode=GridUpdateMode.NO_UPDATE,
     )
 else:
-    # Fallback bonito sin AgGrid: emojis + Styler (colores visibles en web)
+    # Fallback bonito sin AgGrid: reordenamos y ponemos Rol adelante para que siempre se vea
     view_disp = view.copy()
+    col_order = [c for c in ['ID', 'Tarea', 'Rol (RACI)', 'Área', 'Proceso'] if c in view_disp.columns]
+    view_disp = view_disp[col_order]
 
     def raci_emoji(v: str) -> str:
         val = str(v or "").upper().replace(" ", "")
@@ -346,17 +414,17 @@ else:
             styles = []
             for v in s.astype(str):
                 if "🔴🟢" in v or v.strip().upper() in ("AR", "A/R", "A,R"):
-                    styles.append('background: linear-gradient(90deg,#fee2e2,#dcfce7); font-weight:700;')
+                    styles.append('background: linear-gradient(90deg,#fee2e2,#dcfce7); font-weight:700; white-space:nowrap;')
                 elif "🔴" in v or v.strip().upper() == "A":
-                    styles.append('background-color:#fee2e2; color:#991b1b; font-weight:700;')
+                    styles.append('background-color:#fee2e2; color:#991b1b; font-weight:700; white-space:nowrap;')
                 elif "🟢" in v or v.strip().upper() == "R":
-                    styles.append('background-color:#dcfce7; color:#065f46; font-weight:700;')
+                    styles.append('background-color:#dcfce7; color:#065f46; font-weight:700; white-space:nowrap;')
                 elif "🟠" in v or v.strip().upper() == "C":
-                    styles.append('background-color:#fef3c7; color:#92400e; font-weight:700;')
+                    styles.append('background-color:#fef3c7; color:#92400e; font-weight:700; white-space:nowrap;')
                 elif "🔵" in v or v.strip().upper() == "I":
-                    styles.append('background-color:#dbeafe; color:#1e3a8a; font-weight:700;')
+                    styles.append('background-color:#dbeafe; color:#1e3a8a; font-weight:700; white-space:nowrap;')
                 else:
-                    styles.append('')
+                    styles.append('white-space:nowrap;')
             return styles
 
         sty = (
@@ -364,6 +432,7 @@ else:
             .apply(raci_style, subset=['Rol (RACI)'])
             .set_properties(subset=['Rol (RACI)'], **{'text-align':'center'})
         )
+        sty = sty.set_table_styles([{'selector': 'th', 'props': 'text-align: center;'}], overwrite=False)
         st.dataframe(sty, use_container_width=True, hide_index=True)
     else:
         st.dataframe(view_disp, use_container_width=True, hide_index=True)
@@ -372,28 +441,28 @@ else:
 col1, col2, col3, col4, col5 = st.columns([1,1,1,1,1])
 col1.markdown(f"""
 <div class='metric'>
-  <div class='lbl'><span class='dot A'></span> A</div>
+  <div class='lbl'><span class='dot A'></span> A (Accountable)</div>
   <div class='num'>{count_A}</div>
 </div>""", unsafe_allow_html=True)
 col2.markdown(f"""
 <div class='metric'>
-  <div class='lbl'><span class='dot R'></span> R</div>
+  <div class='lbl'><span class='dot R'></span> R (Responsible)</div>
   <div class='num'>{count_R}</div>
 </div>""", unsafe_allow_html=True)
 col3.markdown(f"""
 <div class='metric'>
-  <div class='lbl'><span class='dot C'></span> C</div>
+  <div class='lbl'><span class='dot C'></span> C (Consulted)</div>
   <div class='num'>{count_C}</div>
 </div>""", unsafe_allow_html=True)
 col4.markdown(f"""
 <div class='metric'>
-  <div class='lbl'><span class='dot I'></span> I</div>
+  <div class='lbl'><span class='dot I'></span> I (Informed)</div>
   <div class='num'>{count_I}</div>
 </div>""", unsafe_allow_html=True)
 if {"A","R"}.issubset(set(roles_sel)):
     col5.markdown(f"""
     <div class='metric'>
-      <div class='lbl'><span class='dot AR'></span> A/R</div>
+      <div class='lbl'><span class='dot AR'></span> A/R (Accountable&nbsp;&amp;&nbsp;Responsible)</div>
       <div class='num'>{count_AR}</div>
     </div>""", unsafe_allow_html=True)
 else:
@@ -408,8 +477,27 @@ def _slugify(text: str) -> str:
     norm = re.sub(r"_+", "_", norm).strip('_')
     return norm or 'sin_nombre'
 
-proc_for_name = proc_sel if (proc_sel and proc_sel != 'Todos los procesos') else 'Todos los procesos'
-filename = f"{datetime.now():%Y%m%d}_{_slugify(proc_for_name)}_{_slugify(area)}.xlsx"
+def _short_join(parts: list[str], limit: int = 3) -> str:
+    s = "_".join(parts[:limit])
+    return s + ("_etc" if len(parts) > limit else "")
+
+# Nombre de archivo en base a selección
+areas_for_name = (
+    "todas_las_areas" if len(areas_to_use) == len(area_cols)
+    else _short_join([_slugify(a) for a in areas_to_use]) or "todas_las_areas"
+)
+
+if 'Proceso' in df.columns:
+    total_procs = df['Proceso'].dropna().astype(str).str.strip().nunique()
+else:
+    total_procs = 0
+
+if proc_sel and total_procs and len(proc_sel) < total_procs:
+    procs_for_name = _short_join([_slugify(p) for p in proc_sel])
+else:
+    procs_for_name = 'todos_los_procesos'
+
+filename = f"{datetime.now():%Y%m%d}_{procs_for_name}_{areas_for_name}.xlsx"
 
 bio = BytesIO()
 with pd.ExcelWriter(bio, engine='openpyxl') as writer:
