@@ -1,4 +1,4 @@
-matplotlib==3.4.3
+matplotlib
 nanoid
 nbformat
 numpy
@@ -11,4 +11,4 @@ streamlit
 subprocess.run
 tqdm
 urllib3
-ipythonkernel
+ipykernel
