@@ -1,0 +1,14 @@
+matplotlib==3.4.3
+nanoid
+nbformat
+numpy
+openpyxl
+pandas
+pandas-gbq
+plotly
+pyarrow
+streamlit
+subprocess.run
+tqdm
+urllib3
+ipythonkernel
